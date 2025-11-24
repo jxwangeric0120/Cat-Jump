@@ -12,6 +12,9 @@ const CAT_CROUCH_HEIGHT = 25;
 const JUMP_FORCE = 11;
 const GRAVITY = 0.6;
 
+// UI Constants
+const RESUME_BTN = { x: GAME_WIDTH / 2 - 60, y: GAME_HEIGHT / 2 + 10, w: 120, h: 40 };
+
 // Obstacle types
 type ObstacleType = 'CACTUS' | 'TRASH_CAN' | 'BIRD';
 
@@ -24,6 +27,7 @@ let frame = 0;
 let gameSpeed = 5;
 let isGameOver = false;
 let isPlaying = false;
+let isPaused = false;
 let obstacles: Obstacle[] = [];
 let requestID: number;
 
@@ -192,8 +196,6 @@ class Obstacle {
                 this.h = 25;
                 this.groupSize = 1;
                 // Bird height: High enough to duck under, low enough to hit head if standing
-                // Randomly choose between "Duckable" (Head level) and "Jumpable" (Ground level)
-                // But user asked for ducking specifically, so primary is head level.
                 // 175 (Ground) - 55 = 120 (Air).
                 this.y = GROUND_Y - 50 - (Math.random() * 20); 
                 break;
@@ -309,10 +311,6 @@ class Obstacle {
 let cat: Cat;
 
 function spawnObstacle() {
-    // Logic: 
-    // - Always check minimum gap to ensure jumpability
-    // - Randomly choose type
-    
     // Gap depends on speed. Faster = larger gap needed.
     let minGap = 250 + Math.random() * 200 + gameSpeed * 15;
     let lastObs = obstacles[obstacles.length - 1];
@@ -321,17 +319,15 @@ function spawnObstacle() {
         const rand = Math.random();
         let type: ObstacleType = 'CACTUS';
 
-        // Bird Spawn Logic:
-        // - Appears earlier now (gameSpeed > 5.5 is almost immediate after start)
-        // - 30% chance if conditions met
+        // Bird Spawn Logic
         if (gameSpeed > 5.2 && rand > 0.7) {
             type = 'BIRD';
         } 
-        // Trash can logic (20% chance)
+        // Trash can logic
         else if (rand > 0.5) {
             type = 'TRASH_CAN';
         } 
-        // Default Cactus (50% chance)
+        // Default Cactus
         else {
             type = 'CACTUS';
         }
@@ -342,6 +338,13 @@ function spawnObstacle() {
 
 function handleInput() {
     window.addEventListener('keydown', function (e) {
+        // Pause Toggle
+        if (e.code === 'Escape') {
+            togglePause();
+            e.preventDefault();
+            return;
+        }
+
         if (e.code === 'Space') keys['Space'] = true;
         if (e.code === 'ArrowUp') keys['ArrowUp'] = true;
         if (e.code === 'ArrowDown') keys['ArrowDown'] = true;
@@ -367,9 +370,39 @@ function handleInput() {
     });
 }
 
+function togglePause() {
+    if (!isPlaying || isGameOver) return; // Only pause while game is actually running
+
+    isPaused = !isPaused;
+
+    if (isPaused) {
+        cancelAnimationFrame(requestID);
+        drawPauseScreen();
+    } else {
+        requestID = requestAnimationFrame(gameLoop);
+    }
+}
+
+function drawPauseScreen() {
+    if (!ctx) return;
+    
+    // Draw semi-transparent overlay
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+    // Draw "PAUSED" text
+    drawText("PAUSED", GAME_WIDTH / 2, GAME_HEIGHT / 2 - 20, '30px', 'center', '#535353');
+
+    // Draw Resume Button
+    ctx.fillStyle = '#535353';
+    ctx.fillRect(RESUME_BTN.x, RESUME_BTN.y, RESUME_BTN.w, RESUME_BTN.h);
+    
+    // Draw "Resume" text inside button
+    drawText("RESUME", GAME_WIDTH / 2, RESUME_BTN.y + 26, '20px', 'center', '#FFFFFF');
+}
+
 function checkCollision(cat: Cat, obstacle: Obstacle) {
-    // Simple AABB Collision
-    // Hitbox adjustments: Make hitboxes slightly smaller than visuals for fairness
+    // Hitbox adjustments
     const catMargin = 5;
     const obsMargin = 4;
 
@@ -391,6 +424,7 @@ function drawText(text: string, x: number, y: number, size = '20px', align: Canv
 
 function resetGame() {
     isGameOver = false;
+    isPaused = false;
     score = 0;
     gameSpeed = 5;
     obstacles = [];
@@ -401,7 +435,7 @@ function resetGame() {
 }
 
 function gameLoop() {
-    if (!ctx) return;
+    if (!ctx || isPaused) return; // Stop updates if paused
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
     // Draw Ground Line
@@ -460,11 +494,55 @@ function init() {
   if (canvas) {
     ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
     cat = new Cat();
+    
     handleInput();
+
+    // Mouse interactions for the Pause Menu
+    canvas.addEventListener('mousemove', (e) => {
+        if (!isPaused) {
+            canvas.style.cursor = 'default';
+            return;
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const mouseX = (e.clientX - rect.left) * scaleX;
+        const mouseY = (e.clientY - rect.top) * scaleY;
+
+        if (
+            mouseX >= RESUME_BTN.x && 
+            mouseX <= RESUME_BTN.x + RESUME_BTN.w &&
+            mouseY >= RESUME_BTN.y && 
+            mouseY <= RESUME_BTN.y + RESUME_BTN.h
+        ) {
+            canvas.style.cursor = 'pointer';
+        } else {
+            canvas.style.cursor = 'default';
+        }
+    });
+
+    canvas.addEventListener('click', (e) => {
+        if (!isPaused) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const mouseX = (e.clientX - rect.left) * scaleX;
+        const mouseY = (e.clientY - rect.top) * scaleY;
+
+        if (
+            mouseX >= RESUME_BTN.x && 
+            mouseX <= RESUME_BTN.x + RESUME_BTN.w &&
+            mouseY >= RESUME_BTN.y && 
+            mouseY <= RESUME_BTN.y + RESUME_BTN.h
+        ) {
+            togglePause();
+        }
+    });
     
     // Initial draw
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-    // Draw Ground Line
     ctx.beginPath();
     ctx.moveTo(0, GROUND_Y);
     ctx.lineTo(GAME_WIDTH, GROUND_Y);
